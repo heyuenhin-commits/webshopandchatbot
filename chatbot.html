@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Simulator</title>
+    <!-- 引入 Socket.io Client -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <style>
+        /* 簡單的 CSS 樣式，模仿手機聊天介面 */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        
+        body {
+            background-color: #e5e5e5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #app-container {
+            width: 100%;
+            max-width: 400px;
+            height: 100%;
+            max-height: 800px;
+            background-color: #fff;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+        }
+
+        /* 頂部 Header */
+        header {
+            background-color: #0088cc; /* Telegram Blue */
+            color: white;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            background-color: #ccc;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.online { background-color: #4cd964; box-shadow: 0 0 5px #4cd964; }
+
+        /* 訊息顯示區 */
+        #messages-area {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f0f2f5; /* WhatsApp/TG style bg */
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 0 14px;
+            border-radius: 14px;
+            font-size: 15px;
+            line-height: 1.4;
+            position: relative;
+            word-wrap: break-word;
+            white-space: pre-line;
+        }
+
+        /* 機器人訊息 (左邊) */
+        .message.bot {
+            align-self: flex-start;
+            background-color: #ffffff;
+            border: 1px solid #e5e5e5;
+            border-bottom-left-radius: 2px;
+            color: #000;
+        }
+
+        /* 用戶訊息 (右邊) */
+        .message.user {
+            align-self: flex-end;
+            background-color: #0088cc;
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .time {
+            font-size: 10px;
+            text-align: right;
+            margin-top: 4px;
+            opacity: 0.7;
+        }
+
+        /* 底部輸入區 */
+        #input-area {
+            padding: 10px;
+            background-color: #f0f0f0;
+            display: flex;
+            gap: 8px;
+            border-top: 1px solid #ddd;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px 15px;
+            border-radius: 20px;
+            border: 1px solid #ccc;
+            outline: none;
+        }
+
+        button {
+            background-color: #0088cc;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button:disabled { background-color: #ccc; }
+
+        /* GPS / 地圖按鈕細少啲 */
+        #share-gps-btn,
+        #pick-map-btn {
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border-radius: 50%;
+            font-size: 16px;
+        }
+
+        /* 地圖彈窗 */
+        #map-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+        #map-container {
+            width: 90%;
+            max-width: 450px;
+            height: 60vh;
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #map-header {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+        #map {
+            flex: 1;
+        }
+        #map-footer {
+            padding: 8px 10px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+        }
+        #close-map-btn {
+            border: none;
+            background: none;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+
+    <!-- Leaflet 地圖 CSS / JS（使用 OpenStreetMap）-->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+</head>
+<body>
+
+    <div id="app-container">
+        <header>
+            <div>
+                <h3 id="bot-name">CTS289DS Group 8 - 電器查詢 ChatBot</h3>
+                <small id="connection-status">連線中...</small>
+            </div>
+            <div id="status-indicator" class="status-dot"></div>
+        </header>
+
+        <div id="messages-area">
+            <!-- 訊息會加在這裡 -->
+            <div class="message bot">
+                你好！請啟動你的 Node.js Server 並輸入指令。
+                <div class="time">System</div>
+            </div>
+        </div>
+
+        <form id="input-area">
+            <button type="button" id="share-gps-btn" title="分享即時位置">📍</button>
+            <button type="button" id="pick-map-btn" title="在地圖選擇位置">🗺️</button>
+            <input type="text" id="msg-input" placeholder="輸入訊息..." autocomplete="off">
+            <button type="submit" id="send-btn" disabled>傳送</button>
+        </form>
+    </div>
+
+    <!-- 地圖選點彈窗 -->
+    <div id="map-modal">
+        <div id="map-container">
+            <div id="map-header">
+                <span>在地圖揀一個位置</span>
+                <button id="close-map-btn">✕</button>
+            </div>
+            <div id="map"></div>
+            <div id="map-footer">
+                點擊地圖任意位置即可分享座標。
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 設定連線目標 (假設學生的 Server 在 localhost:3000)
+        const socket = io('http://localhost:3000');
+        
+        const statusText = document.getElementById('connection-status');
+        const statusDot = document.getElementById('status-indicator');
+        const sendBtn = document.getElementById('send-btn');
+        const msgInput = document.getElementById('msg-input');
+        const messagesArea = document.getElementById('messages-area');
+        const form = document.getElementById('input-area');
+
+        const shareGpsBtn = document.getElementById('share-gps-btn');
+        const pickMapBtn = document.getElementById('pick-map-btn');
+        const mapModal = document.getElementById('map-modal');
+        const closeMapBtn = document.getElementById('close-map-btn');
+
+        let mapInstance = null;
+        let mapClickHandler = null;
+
+        // 1. 處理連線狀態
+        socket.on('connect', () => {
+            statusText.innerText = '線上';
+            statusDot.classList.add('online');
+            sendBtn.disabled = false;
+        });
+
+        socket.on('disconnect', () => {
+            statusText.innerText = '已斷線 (請檢查 Server)';
+            statusDot.classList.remove('online');
+            sendBtn.disabled = true;
+        });
+
+        // 2. 接收來自 Server (Bot) 的訊息
+        socket.on('bot_message', (data) => {
+            // 兼容純文字或物件格式
+            const text = typeof data === 'object' ? data.text : data;
+            appendMessage(text, 'bot');
+        });
+
+        // 3. 發送文字訊息給 Server
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const text = msgInput.value.trim();
+            if (!text) return;
+
+            // 顯示在自己的畫面上
+            appendMessage(text, 'user');
+
+            // 發送給後端 (模擬 Telegram 的 msg 物件結構)
+            socket.emit('user_message', {
+                text: text,
+                chat: { id: socket.id }, // 用 socket.id 模擬 chat_id
+                from: {
+                    id: socket.id,
+                    first_name: 'Student',
+                    is_bot: false
+                }
+            });
+
+            msgInput.value = '';
+        });
+
+        // 4. 分享即時 GPS 位置
+        shareGpsBtn.addEventListener('click', () => {
+            if (!navigator.geolocation) {
+                appendMessage('此瀏覽器不支援定位功能。', 'bot');
+                return;
+            }
+
+            shareGpsBtn.disabled = true;
+            shareGpsBtn.textContent = '⏳';
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+
+                    const text = `📍 分享即時位置：(${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+
+                    // 顯示喺自己畫面
+                    appendMessage(text, 'user');
+
+                    // 發送俾後端：沿用 user_message 事件，但多傳 location
+                    socket.emit('user_message', {
+                        text: text,
+                        location: {
+                            latitude: lat,
+                            longitude: lng,
+                            is_live: false
+                        },
+                        chat: { id: socket.id },
+                        from: {
+                            id: socket.id,
+                            first_name: 'Student',
+                            is_bot: false
+                        }
+                    });
+
+                    shareGpsBtn.disabled = false;
+                    shareGpsBtn.textContent = '📍';
+                },
+                (err) => {
+                    console.error(err);
+                    appendMessage('無法取得定位，請確認已允許瀏覽器使用定位功能。', 'bot');
+                    shareGpsBtn.disabled = false;
+                    shareGpsBtn.textContent = '📍';
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        });
+
+        // 5. 打開地圖揀位置
+        pickMapBtn.addEventListener('click', () => {
+            mapModal.style.display = 'flex';
+
+            // 第一次開啟先初始化地圖
+            if (!mapInstance) {
+                mapInstance = L.map('map').setView([22.302711, 114.177216], 12); // 預設香港中環附近
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap contributors'
+                }).addTo(mapInstance);
+            }
+
+            // 每次打開都重新註冊 click handler
+            if (mapClickHandler) {
+                mapInstance.off('click', mapClickHandler);
+            }
+
+            mapClickHandler = function (e) {
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                const text = `📍 分享地圖選擇位置：(${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+
+                appendMessage(text, 'user');
+
+                socket.emit('user_message', {
+                    text: text,
+                    location: {
+                        latitude: lat,
+                        longitude: lng,
+                        selected_on_map: true
+                    },
+                    chat: { id: socket.id },
+                    from: {
+                        id: socket.id,
+                        first_name: 'Student',
+                        is_bot: false
+                    }
+                });
+
+                mapModal.style.display = 'none';
+            };
+
+            mapInstance.on('click', mapClickHandler);
+
+            // 修正第一次顯示時地圖尺寸問題
+            setTimeout(() => {
+                mapInstance.invalidateSize();
+            }, 100);
+        });
+
+        // 關閉地圖彈窗（唔揀就關）
+        closeMapBtn.addEventListener('click', () => {
+            mapModal.style.display = 'none';
+        });
+
+        // 點 backdrop 關閉
+        mapModal.addEventListener('click', (e) => {
+            if (e.target === mapModal) {
+                mapModal.style.display = 'none';
+            }
+        });
+
+        // 輔助功能：將訊息加入畫面
+        function appendMessage(text, sender) {
+            const div = document.createElement('div');
+            div.classList.add('message', sender);
+            
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            div.innerHTML = `
+                ${escapeHtml(text)}
+                <div class="time">${time}</div>
+            `;
+            
+            messagesArea.appendChild(div);
+            messagesArea.scrollTop = messagesArea.scrollHeight; // 自動捲動到底部
+        }
+
+        // 簡單的 XSS 防護
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
